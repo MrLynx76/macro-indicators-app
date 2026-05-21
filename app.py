@@ -69,12 +69,16 @@ def fetch_fred_data(series_id):
 def fetch_yahoo_data(ticker):
     """Fetch daily stock data from Yahoo Finance"""
     try:
-        import csv
-        import io
         cutoff_date = (datetime.now() - timedelta(days=90)).strftime('%s')
         today = datetime.now().strftime('%s')
         url = f"https://query1.finance.yahoo.com/v7/finance/download/{ticker}?period1={cutoff_date}&period2={today}&interval=1d&events=history&includeAdjustedClose=true"
-        response = requests.get(url, timeout=5)
+
+        # Yahoo Finance requires User-Agent header to return data
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+
+        response = requests.get(url, headers=headers, timeout=5)
         if response.status_code == 200:
             lines = response.text.strip().split('\n')
             observations = []
