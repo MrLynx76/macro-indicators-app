@@ -67,23 +67,32 @@ def fetch_fred_data(series_id):
         return []
 
 def fetch_yahoo_data(ticker):
-    """Fetch daily stock data using yfinance"""
+    """Fetch daily stock data using yfinance with fallback error handling"""
     try:
         import yfinance as yf
+        print(f"[YFinance] Downloading {ticker}...")
         cutoff_date = datetime.now() - timedelta(days=90)
         data = yf.download(ticker, start=cutoff_date.strftime('%Y-%m-%d'), progress=False, timeout=10)
 
         observations = []
-        if not data.empty:
+        if not data.empty and len(data) > 0:
             for date, row in data.iterrows():
-                observations.append({
-                    'date': date.strftime('%Y-%m-%d'),
-                    'value': float(row['Adj Close'])
-                })
-        return observations
+                try:
+                    observations.append({
+                        'date': date.strftime('%Y-%m-%d'),
+                        'value': float(row['Adj Close'])
+                    })
+                except (ValueError, TypeError):
+                    continue
+            if observations:
+                print(f"[YFinance] ✓ {ticker}: {len(observations)} records retrieved")
+                return observations
+        print(f"[YFinance] ✗ {ticker}: No data returned")
     except Exception as e:
-        print(f"Error fetching {ticker}: {e}")
-        return []
+        print(f"[YFinance] Error downloading {ticker}: {str(e)[:80]}")
+
+    print(f"[Error] {ticker}: Unable to retrieve data from any source")
+    return []
 
 @app.route('/')
 def index():
@@ -98,6 +107,8 @@ def get_data():
     for indicator_code, indicator_name in INDICATORS.items():
         if indicator_code == "HYG":
             observations = fetch_yahoo_data("HYG")
+        elif indicator_code == "MMNRNJ":
+            observations = fetch_yahoo_data("^MOVE")
         else:
             observations = fetch_fred_data(indicator_code)
 
