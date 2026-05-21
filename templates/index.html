@@ -350,6 +350,29 @@
             }
         }
 
+        function formatValue(code, value) {
+            if (value === null || value === undefined) return 'N/A';
+
+            // Indicadores que necesitan formato $ con miles
+            const currencyIndicators = ['WRESBAL', 'WTREGEN', 'HYG'];
+
+            if (currencyIndicators.includes(code)) {
+                return '$' + Math.round(value).toLocaleString('en-US');
+            }
+            return value.toFixed(2);
+        }
+
+        function formatValueDetailed(code, value) {
+            if (value === null || value === undefined) return 'N/A';
+
+            const currencyIndicators = ['WRESBAL', 'WTREGEN', 'HYG'];
+
+            if (currencyIndicators.includes(code)) {
+                return '$' + value.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+            }
+            return value.toFixed(2);
+        }
+
         function renderIndicators() {
             const container = document.getElementById('indicatorsContainer');
             container.innerHTML = '';
@@ -362,7 +385,7 @@
                             <div class="indicator-name">${data.name}</div>
                             <div class="status-badge ${statusClass}"></div>
                         </div>
-                        <div class="current-value">${data.current !== null ? data.current.toFixed(2) : 'N/A'}</div>
+                        <div class="current-value">${formatValue(code, data.current)}</div>
                         <div class="last-date">Último: ${data.date}</div>
 
                         <div class="last-three">
@@ -370,7 +393,7 @@
                             ${data.last_three.map(v => `
                                 <div class="last-three-item">
                                     <span>${v.date}</span>
-                                    <span>${v.value.toFixed(2)}</span>
+                                    <span>${formatValueDetailed(code, v.value)}</span>
                                 </div>
                             `).join('')}
                         </div>

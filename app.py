@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, jsonify
 import requests
 import os
+import yfinance as yf
 from datetime import datetime, timedelta
 import json
 from functools import wraps
@@ -69,6 +70,41 @@ def fetch_fred_data(series_id):
         print(f"Error fetching {series_id}: {e}")
         return []
 
+def fetch_yfinance_data(ticker):
+    """Fetch stock data from Yahoo Finance"""
+    try:
+        cutoff_date = datetime.now() - timedelta(days=365)
+        hist = yf.download(ticker, start=cutoff_date.strftime('%Y-%m-%d'), end=datetime.now().strftime('%Y-%m-%d'), progress=False)
+
+        if hist.empty:
+            return None, [], []
+
+        # Último cierre
+        last_price = float(hist['Close'].iloc[-1])
+        last_date = hist.index[-1].strftime('%Y-%m-%d')
+
+        # Últimos 3 valores
+        last_three = []
+        for i in range(min(3, len(hist))):
+            idx = -(3-i)
+            last_three.append({
+                'date': hist.index[idx].strftime('%Y-%m-%d'),
+                'value': float(hist['Close'].iloc[idx])
+            })
+
+        # Últimos 12 meses
+        year_data = []
+        for date, row in hist.iterrows():
+            year_data.append({
+                'date': date.strftime('%Y-%m-%d'),
+                'value': float(row['Close'])
+            })
+
+        return last_price, last_date, last_three, year_data
+    except Exception as e:
+        print(f"Error fetching {ticker}: {e}")
+        return None, None, [], []
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -80,39 +116,49 @@ def get_data():
     result = {}
 
     for indicator_code, indicator_name in INDICATORS.items():
-        observations = fetch_fred_data(indicator_code)
+        current_value = None
+        last_date = None
+        last_three = []
+        year_data = []
+        status = "gray"
 
-        if observations:
-            # Últimos datos
-            last_obs = observations[-1]
-            current_value = float(last_obs['value']) if last_obs['value'] != '.' else None
-            last_date = last_obs['date']
+        if indicator_code == "HYG":
+            # Obtener HYG desde Yahoo Finance
+            current_value, last_date, last_three, year_data = fetch_yfinance_data("HYG")
+        else:
+            # Obtener del FRED
+            observations = fetch_fred_data(indicator_code)
 
-            # Últimos 3 valores
-            last_three = []
-            for obs in observations[-3:]:
-                if obs['value'] != '.':
-                    last_three.append({
-                        'date': obs['date'],
-                        'value': float(obs['value'])
-                    })
+            if observations:
+                # Últimos datos
+                last_obs = observations[-1]
+                current_value = float(last_obs['value']) if last_obs['value'] != '.' else None
+                last_date = last_obs['date']
 
-            # Últimos 12 meses
-            cutoff_date = datetime.now() - timedelta(days=365)
-            year_data = []
-            for obs in observations:
-                if obs['value'] != '.':
-                    try:
-                        obs_date = datetime.strptime(obs['date'], '%Y-%m-%d')
-                        if obs_date >= cutoff_date:
-                            year_data.append({
-                                'date': obs['date'],
-                                'value': float(obs['value'])
-                            })
-                    except:
-                        pass
+                # Últimos 3 valores
+                for obs in observations[-3:]:
+                    if obs['value'] != '.':
+                        last_three.append({
+                            'date': obs['date'],
+                            'value': float(obs['value'])
+                        })
 
-            status = get_status(current_value, indicator_code) if current_value else "gray"
+                # Últimos 12 meses
+                cutoff_date = datetime.now() - timedelta(days=365)
+                for obs in observations:
+                    if obs['value'] != '.':
+                        try:
+                            obs_date = datetime.strptime(obs['date'], '%Y-%m-%d')
+                            if obs_date >= cutoff_date:
+                                year_data.append({
+                                    'date': obs['date'],
+                                    'value': float(obs['value'])
+                                })
+                        except:
+                            pass
+
+        if current_value is not None and last_date:
+            status = get_status(current_value, indicator_code)
 
             result[indicator_code] = {
                 'name': indicator_name,
