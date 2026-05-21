@@ -67,30 +67,20 @@ def fetch_fred_data(series_id):
         return []
 
 def fetch_yahoo_data(ticker):
-    """Fetch daily stock data from Yahoo Finance"""
+    """Fetch daily stock data using yfinance"""
     try:
-        cutoff_date = (datetime.now() - timedelta(days=90)).strftime('%s')
-        today = datetime.now().strftime('%s')
-        url = f"https://query1.finance.yahoo.com/v7/finance/download/{ticker}?period1={cutoff_date}&period2={today}&interval=1d&events=history&includeAdjustedClose=true"
+        import yfinance as yf
+        cutoff_date = datetime.now() - timedelta(days=90)
+        data = yf.download(ticker, start=cutoff_date.strftime('%Y-%m-%d'), progress=False, timeout=10)
 
-        # Yahoo Finance requires User-Agent header to return data
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
-
-        response = requests.get(url, headers=headers, timeout=5)
-        if response.status_code == 200:
-            lines = response.text.strip().split('\n')
-            observations = []
-            for line in lines[1:]:  # Skip header
-                parts = line.split(',')
-                if len(parts) >= 5:
-                    observations.append({
-                        'date': parts[0],
-                        'value': float(parts[4])  # Adjusted Close
-                    })
-            return observations
-        return []
+        observations = []
+        if not data.empty:
+            for date, row in data.iterrows():
+                observations.append({
+                    'date': date.strftime('%Y-%m-%d'),
+                    'value': float(row['Adj Close'])
+                })
+        return observations
     except Exception as e:
         print(f"Error fetching {ticker}: {e}")
         return []
@@ -108,8 +98,6 @@ def get_data():
     for indicator_code, indicator_name in INDICATORS.items():
         if indicator_code == "HYG":
             observations = fetch_yahoo_data("HYG")
-        elif indicator_code == "MMNRNJ":
-            observations = fetch_yahoo_data("^MOVE")
         else:
             observations = fetch_fred_data(indicator_code)
 
