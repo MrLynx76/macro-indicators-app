@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, jsonify
 import requests
+import os
 from datetime import datetime, timedelta
 import json
 from functools import wraps
@@ -8,7 +9,7 @@ app = Flask(__name__)
 
 # Configuración
 PASSWORD = "Temporal1$"
-FRED_API_KEY = "your_fred_api_key_here"  # Reemplazar con API key real
+FRED_API_KEY = os.environ.get('FRED_API_KEY', 'your_fred_api_key_here')
 
 # Umbrales definidos por Boss (2026-05-21)
 THRESHOLDS = {
