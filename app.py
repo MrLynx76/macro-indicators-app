@@ -10,6 +10,7 @@ app = Flask(__name__)
 # Configuración
 PASSWORD = "Temporal1$"
 FRED_API_KEY = os.environ.get('FRED_API_KEY', 'your_fred_api_key_here')
+ALPHA_VANTAGE_KEY = os.environ.get('ALPHA_VANTAGE_KEY', 'your_alpha_vantage_key_here')
 
 # Umbrales definidos por Boss (2026-05-21)
 THRESHOLDS = {
@@ -20,6 +21,7 @@ THRESHOLDS = {
     "WTREGEN": {"normal": (0, 700), "tension": (700, 900), "crisis": (900, 10000)},
     "BAMLC0A4CBBB": {"normal": (0, 1.05), "tension": (1.05, 1.15), "crisis": (1.15, 100)},
     "BAMLH0A0HYM2": {"normal": (0, 3.5), "tension": (3.5, 4.5), "crisis": (4.5, 100)},
+    "HYG": {"normal": (80, 10000), "tension": (78.5, 80), "crisis": (0, 78.5)},
 }
 
 INDICATORS = {
@@ -30,6 +32,7 @@ INDICATORS = {
     "WTREGEN": "Treasury General Account",
     "BAMLC0A4CBBB": "BBB OAS (Corporate)",
     "BAMLH0A0HYM2": "High Yield OAS",
+    "HYG": "iShares HY ETF (Precio)",
 }
 
 def check_auth(f):
@@ -67,6 +70,29 @@ def fetch_fred_data(series_id):
         print(f"Error fetching {series_id}: {e}")
         return []
 
+def fetch_alpha_vantage_data(symbol):
+    """Fetch daily stock data from Alpha Vantage"""
+    try:
+        url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&apikey={ALPHA_VANTAGE_KEY}"
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            time_series = data.get('Time Series (Daily)', {})
+            if not time_series:
+                return []
+
+            observations = []
+            for date in sorted(time_series.keys(), reverse=True):
+                observations.append({
+                    'date': date,
+                    'value': float(time_series[date]['4. close'])
+                })
+            return observations
+        return []
+    except Exception as e:
+        print(f"Error fetching {symbol}: {e}")
+        return []
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -78,7 +104,11 @@ def get_data():
     result = {}
 
     for indicator_code, indicator_name in INDICATORS.items():
-        observations = fetch_fred_data(indicator_code)
+        # Usar Alpha Vantage para HYG, FRED para el resto
+        if indicator_code == "HYG":
+            observations = fetch_alpha_vantage_data("HYG")
+        else:
+            observations = fetch_fred_data(indicator_code)
 
         if observations:
             # Últimos datos
