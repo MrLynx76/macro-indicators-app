@@ -6,6 +6,7 @@ import io
 from datetime import datetime, timedelta
 import json
 from functools import wraps
+from concurrent.futures import ThreadPoolExecutor
 
 app = Flask(__name__)
 
@@ -109,7 +110,7 @@ def fetch_stooq(symbol):
         url = (f"https://stooq.com/q/d/l/?s={symbol}&i=d"
                f"&d1={d1:%Y%m%d}&d2={d2:%Y%m%d}")
         response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"},
-                                timeout=15)
+                                timeout=8)
         if response.status_code != 200 or "Date,Open" not in response.text:
             print(f"[Stooq] Sin datos para {symbol}")
             return []
@@ -133,7 +134,7 @@ def fetch_tradingview_quote(symbol):
         url = "https://scanner.tradingview.com/symbol"
         params = {"symbol": symbol, "fields": "close", "no_404": "true"}
         response = requests.get(url, params=params, headers=TV_HEADERS,
-                                timeout=15)
+                                timeout=8)
         if response.status_code != 200:
             print(f"[TradingView] {symbol}: HTTP {response.status_code}")
             return []
@@ -175,55 +176,72 @@ def fetch_indicator(indicator_code):
 def index():
     return render_template('index.html')
 
+def process_observations(indicator_code, indicator_name, observations):
+    """Convierte las observaciones de un indicador al formato de salida.
+    Devuelve None si no hay datos utilizables."""
+    if not observations:
+        return None
+
+    last_obs = observations[-1]
+    current_value = float(last_obs['value']) if last_obs['value'] != '.' else None
+    last_date = last_obs['date']
+
+    # Últimos 3 valores
+    last_three = []
+    for obs in observations[-3:]:
+        if obs['value'] != '.':
+            last_three.append({'date': obs['date'],
+                               'value': float(obs['value'])})
+
+    # Últimos 3 meses
+    cutoff_date = datetime.now() - timedelta(days=90)
+    year_data = []
+    for obs in observations:
+        if obs['value'] != '.':
+            try:
+                obs_date = datetime.strptime(obs['date'], '%Y-%m-%d')
+                if obs_date >= cutoff_date:
+                    year_data.append({'date': obs['date'],
+                                      'value': float(obs['value'])})
+            except Exception:
+                pass
+
+    status = get_status(current_value, indicator_code) if current_value else "gray"
+
+    return {
+        'name': indicator_name,
+        'current': current_value,
+        'date': last_date,
+        'last_three': last_three,
+        'year_data': year_data,
+        'status': status,
+    }
+
 @app.route('/api/data', methods=['GET'])
 @check_auth
 def get_data():
-    """Retorna datos de todos los indicadores"""
+    """Retorna datos de todos los indicadores.
+    SIEMPRE devuelve JSON válido (status 200), aunque alguna fuente falle:
+    así el frontend nunca recibe una página de error HTML."""
     result = {}
+    try:
+        codes = list(INDICATORS.keys())
+        # Descarga en paralelo: el tiempo total ≈ la llamada más lenta,
+        # no la suma. Evita que gunicorn mate el worker por timeout.
+        with ThreadPoolExecutor(max_workers=len(codes)) as executor:
+            fetched = dict(zip(codes, executor.map(fetch_indicator, codes)))
 
-    for indicator_code, indicator_name in INDICATORS.items():
-        observations = fetch_indicator(indicator_code)
-
-        if observations:
-            # Últimos datos
-            last_obs = observations[-1]
-            current_value = float(last_obs['value']) if last_obs['value'] != '.' else None
-            last_date = last_obs['date']
-
-            # Últimos 3 valores
-            last_three = []
-            for obs in observations[-3:]:
-                if obs['value'] != '.':
-                    last_three.append({
-                        'date': obs['date'],
-                        'value': float(obs['value'])
-                    })
-
-            # Últimos 3 meses
-            cutoff_date = datetime.now() - timedelta(days=90)
-            year_data = []
-            for obs in observations:
-                if obs['value'] != '.':
-                    try:
-                        obs_date = datetime.strptime(obs['date'], '%Y-%m-%d')
-                        if obs_date >= cutoff_date:
-                            year_data.append({
-                                'date': obs['date'],
-                                'value': float(obs['value'])
-                            })
-                    except:
-                        pass
-
-            status = get_status(current_value, indicator_code) if current_value else "gray"
-
-            result[indicator_code] = {
-                'name': indicator_name,
-                'current': current_value,
-                'date': last_date,
-                'last_three': last_three,
-                'year_data': year_data,
-                'status': status
-            }
+        for indicator_code, indicator_name in INDICATORS.items():
+            try:
+                processed = process_observations(
+                    indicator_code, indicator_name,
+                    fetched.get(indicator_code))
+                if processed:
+                    result[indicator_code] = processed
+            except Exception as e:
+                print(f"[get_data] Error procesando {indicator_code}: {e}")
+    except Exception as e:
+        print(f"[get_data] Error general: {e}")
 
     return jsonify(result)
 

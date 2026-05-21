@@ -342,6 +342,11 @@
                     return;
                 }
 
+                if (!response.ok) {
+                    const txt = await response.text();
+                    throw new Error(`El servidor respondió ${response.status}. ${txt.slice(0, 150)}`);
+                }
+
                 currentData = await response.json();
                 renderIndicators();
                 document.getElementById('errorMessage').innerHTML = '';
