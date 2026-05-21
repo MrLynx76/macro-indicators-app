@@ -25,14 +25,12 @@ THRESHOLDS = {
 }
 
 INDICATORS = {
-    "DGS10": "Rendimiento 10Y US",
-    "MMNRNJ": "MOVE Index (volatilidad bonos)",
-    "DXY": "Índice Dólar US",
-    "WRESBAL": "Reserve Balances (Fed)",
-    "WTREGEN": "Treasury General Account",
-    "BAMLC0A4CBBB": "BBB OAS (Corporate)",
-    "BAMLH0A0HYM2": "High Yield OAS",
-    "HYG": "iShares HY ETF (Precio)",
+    "DGS10": "Rendimiento US Bond 10 años",
+    "BAMLC0A4CBBB": "Prima de riesgo Bonos Corporativos USA BBB OAS",
+    "HYG": "iShares iBoxx $ High Yield Corporate Bond ETF",
+    "MMNRNJ": "MOVE Index (Volatilidad US Bond)",
+    "WRESBAL": "FRED Reserve Balances",
+    "WTREGEN": "FRED Treasury General Account",
 }
 
 def check_auth(f):
@@ -104,9 +102,11 @@ def get_data():
     result = {}
 
     for indicator_code, indicator_name in INDICATORS.items():
-        # Usar Alpha Vantage para HYG, FRED para el resto
+        # Usar Alpha Vantage para HYG y MMNRNJ (MOVE), FRED para el resto
         if indicator_code == "HYG":
             observations = fetch_alpha_vantage_data("HYG")
+        elif indicator_code == "MMNRNJ":
+            observations = fetch_alpha_vantage_data("MOVE")
         else:
             observations = fetch_fred_data(indicator_code)
 
@@ -125,8 +125,8 @@ def get_data():
                         'value': float(obs['value'])
                     })
 
-            # Últimos 12 meses
-            cutoff_date = datetime.now() - timedelta(days=365)
+            # Últimos 3 meses
+            cutoff_date = datetime.now() - timedelta(days=90)
             year_data = []
             for obs in observations:
                 if obs['value'] != '.':
