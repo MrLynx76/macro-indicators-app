@@ -66,24 +66,26 @@ def fetch_fred_data(series_id):
         print(f"Error fetching {series_id}: {e}")
         return []
 
-def fetch_polygon_data(ticker):
-    """Fetch daily stock data from Polygon.io"""
+def fetch_yahoo_data(ticker):
+    """Fetch daily stock data from Yahoo Finance"""
     try:
-        # Usar el endpoint de agregados para obtener múltiples días
-        cutoff_date = (datetime.now() - timedelta(days=90)).strftime('%Y-%m-%d')
-        today = datetime.now().strftime('%Y-%m-%d')
-        url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{cutoff_date}/{today}?adjusted=true&apiKey={POLYGON_API_KEY}"
+        import csv
+        import io
+        cutoff_date = (datetime.now() - timedelta(days=90)).strftime('%s')
+        today = datetime.now().strftime('%s')
+        url = f"https://query1.finance.yahoo.com/v7/finance/download/{ticker}?period1={cutoff_date}&period2={today}&interval=1d&events=history&includeAdjustedClose=true"
         response = requests.get(url, timeout=5)
         if response.status_code == 200:
-            data = response.json()
-            if data.get('status') == 'OK' and data.get('results'):
-                observations = []
-                for result in data.get('results', []):
+            lines = response.text.strip().split('\n')
+            observations = []
+            for line in lines[1:]:  # Skip header
+                parts = line.split(',')
+                if len(parts) >= 5:
                     observations.append({
-                        'date': datetime.fromtimestamp(result['t']/1000).strftime('%Y-%m-%d'),
-                        'value': float(result.get('c', 0))
+                        'date': parts[0],
+                        'value': float(parts[4])  # Adjusted Close
                     })
-                return observations
+            return observations
         return []
     except Exception as e:
         print(f"Error fetching {ticker}: {e}")
@@ -101,9 +103,9 @@ def get_data():
 
     for indicator_code, indicator_name in INDICATORS.items():
         if indicator_code == "HYG":
-            observations = fetch_polygon_data("HYG")
+            observations = fetch_yahoo_data("HYG")
         elif indicator_code == "MMNRNJ":
-            observations = fetch_polygon_data("MOVE")
+            observations = fetch_yahoo_data("^MOVE")
         else:
             observations = fetch_fred_data(indicator_code)
 
