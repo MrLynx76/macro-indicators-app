@@ -10,23 +10,21 @@ app = Flask(__name__)
 # Configuración
 PASSWORD = "Temporal1$"
 FRED_API_KEY = os.environ.get('FRED_API_KEY', 'your_fred_api_key_here')
-ALPHA_VANTAGE_KEY = os.environ.get('ALPHA_VANTAGE_KEY', 'your_alpha_vantage_key_here')
+POLYGON_API_KEY = os.environ.get('POLYGON_API_KEY', 'your_polygon_api_key_here')
 
 # Umbrales definidos por Boss (2026-05-21)
 THRESHOLDS = {
     "DGS10": {"normal": (0, 4.5), "tension": (4.51, 4.65), "crisis": (4.66, 100)},
-    "MMNRNJ": {"normal": (0, 85), "tension": (85, 95), "crisis": (95, 1000)},
-    "DXY": {"normal": (0, 98.5), "tension": (98.5, 99.5), "crisis": (99.5, 200)},
+    "BAMLC0A4CBBB": {"normal": (0, 1.05), "tension": (1.05, 1.15), "crisis": (1.15, 100)},
+    "HYG": {"normal": (80, 10000), "tension": (78.5, 80), "crisis": (0, 78.5)},
+    "MMNRNJ": {"normal": (0, 200), "tension": (80, 120), "crisis": (120, 500)},
     "WRESBAL": {"normal": (3000, 100000), "tension": (2800, 3000), "crisis": (0, 2800)},
     "WTREGEN": {"normal": (0, 700), "tension": (700, 900), "crisis": (900, 10000)},
-    "BAMLC0A4CBBB": {"normal": (0, 1.05), "tension": (1.05, 1.15), "crisis": (1.15, 100)},
-    "BAMLH0A0HYM2": {"normal": (0, 3.5), "tension": (3.5, 4.5), "crisis": (4.5, 100)},
-    "HYG": {"normal": (80, 10000), "tension": (78.5, 80), "crisis": (0, 78.5)},
 }
 
 INDICATORS = {
     "DGS10": "Rendimiento US Bond 10 años",
-    "BAMLC0A4CBBB": "Prima de riesgo Bonos Corporativos USA BBB OAS",
+    "BAMLC0A4CBBB": "Prima de riesgo US Bond BBB OAS",
     "HYG": "iShares iBoxx $ High Yield Corporate Bond ETF",
     "MMNRNJ": "MOVE Index (Volatilidad US Bond)",
     "WRESBAL": "FRED Reserve Balances",
@@ -68,27 +66,23 @@ def fetch_fred_data(series_id):
         print(f"Error fetching {series_id}: {e}")
         return []
 
-def fetch_alpha_vantage_data(symbol):
-    """Fetch daily stock data from Alpha Vantage"""
+def fetch_polygon_data(ticker):
+    """Fetch daily stock data from Polygon.io"""
     try:
-        url = f"https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={symbol}&apikey={ALPHA_VANTAGE_KEY}"
+        url = f"https://api.polygon.io/v1/open-close/{ticker}/2026-05-20?adjusted=true&apiKey={POLYGON_API_KEY}"
         response = requests.get(url, timeout=5)
         if response.status_code == 200:
             data = response.json()
-            time_series = data.get('Time Series (Daily)', {})
-            if not time_series:
-                return []
-
-            observations = []
-            for date in sorted(time_series.keys(), reverse=True):
-                observations.append({
-                    'date': date,
-                    'value': float(time_series[date]['4. close'])
-                })
-            return observations
+            if data.get('status') == 'OK':
+                # Polygon retorna un día a la vez, necesitamos hacer múltiples requests
+                # Por ahora retornamos datos básicos
+                return [{
+                    'date': data.get('from'),
+                    'value': float(data.get('c', 0))
+                }]
         return []
     except Exception as e:
-        print(f"Error fetching {symbol}: {e}")
+        print(f"Error fetching {ticker}: {e}")
         return []
 
 @app.route('/')
@@ -102,11 +96,10 @@ def get_data():
     result = {}
 
     for indicator_code, indicator_name in INDICATORS.items():
-        # Usar Alpha Vantage para HYG y MMNRNJ (MOVE), FRED para el resto
         if indicator_code == "HYG":
-            observations = fetch_alpha_vantage_data("HYG")
+            observations = fetch_polygon_data("HYG")
         elif indicator_code == "MMNRNJ":
-            observations = fetch_alpha_vantage_data("MOVE")
+            observations = fetch_polygon_data("MOVE")
         else:
             observations = fetch_fred_data(indicator_code)
 
