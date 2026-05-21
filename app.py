@@ -67,7 +67,8 @@ def fetch_fred_data(series_id):
         return []
 
 def fetch_yahoo_data(ticker):
-    """Fetch daily stock data using yfinance with fallback error handling"""
+    """Fetch data from yfinance or fallback to web scraping"""
+    # First try yfinance
     try:
         import yfinance as yf
         print(f"[YFinance] Downloading {ticker}...")
@@ -87,11 +88,49 @@ def fetch_yahoo_data(ticker):
             if observations:
                 print(f"[YFinance] ✓ {ticker}: {len(observations)} records retrieved")
                 return observations
-        print(f"[YFinance] ✗ {ticker}: No data returned")
     except Exception as e:
-        print(f"[YFinance] Error downloading {ticker}: {str(e)[:80]}")
+        print(f"[YFinance] Failed: {str(e)[:60]}")
 
-    print(f"[Error] {ticker}: Unable to retrieve data from any source")
+    # Fallback: Web scraping from investing.com
+    print(f"[Scraping] Attempting web scraping for {ticker}...")
+    try:
+        from bs4 import BeautifulSoup
+
+        investing_urls = {
+            "HYG": "https://www.investing.com/etfs/ishares-h-y-corporate-bond",
+            "MMNRNJ": "https://www.investing.com/indices/move-index"
+        }
+
+        url = investing_urls.get(ticker)
+        if not url:
+            return []
+
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+
+        response = requests.get(url, headers=headers, timeout=10)
+        soup = BeautifulSoup(response.content, 'html.parser')
+
+        # Extract price from investing.com page
+        price_elem = soup.find('span', {'class': ['text-xl', 'last']}) or \
+                    soup.find('span', {'data-test': 'instrument-price'})
+
+        if price_elem:
+            price_text = price_elem.get_text(strip=True).replace(',', '')
+            current_value = float(price_text)
+            today = datetime.now().strftime('%Y-%m-%d')
+
+            observations = [{
+                'date': today,
+                'value': current_value
+            }]
+            print(f"[Scraping] ✓ {ticker}: {current_value}")
+            return observations
+    except Exception as e:
+        print(f"[Scraping] Failed: {str(e)[:60]}")
+
+    print(f"[Error] {ticker}: All sources failed")
     return []
 
 @app.route('/')
