@@ -424,7 +424,7 @@
             charts[code] = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: data.year_data.map(d => d.date),
+                    labels: data.year_data.map(d => d.date.substring(5)),
                     datasets: [{
                         label: data.name,
                         data: data.year_data.map(d => d.value),

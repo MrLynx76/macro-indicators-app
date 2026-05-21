@@ -69,17 +69,21 @@ def fetch_fred_data(series_id):
 def fetch_polygon_data(ticker):
     """Fetch daily stock data from Polygon.io"""
     try:
-        url = f"https://api.polygon.io/v1/open-close/{ticker}/2026-05-20?adjusted=true&apiKey={POLYGON_API_KEY}"
+        # Usar el endpoint de agregados para obtener múltiples días
+        cutoff_date = (datetime.now() - timedelta(days=90)).strftime('%Y-%m-%d')
+        today = datetime.now().strftime('%Y-%m-%d')
+        url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/{cutoff_date}/{today}?adjusted=true&apiKey={POLYGON_API_KEY}"
         response = requests.get(url, timeout=5)
         if response.status_code == 200:
             data = response.json()
-            if data.get('status') == 'OK':
-                # Polygon retorna un día a la vez, necesitamos hacer múltiples requests
-                # Por ahora retornamos datos básicos
-                return [{
-                    'date': data.get('from'),
-                    'value': float(data.get('c', 0))
-                }]
+            if data.get('status') == 'OK' and data.get('results'):
+                observations = []
+                for result in data.get('results', []):
+                    observations.append({
+                        'date': datetime.fromtimestamp(result['t']/1000).strftime('%Y-%m-%d'),
+                        'value': float(result.get('c', 0))
+                    })
+                return observations
         return []
     except Exception as e:
         print(f"Error fetching {ticker}: {e}")
