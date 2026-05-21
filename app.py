@@ -1,6 +1,8 @@
 from flask import Flask, render_template, request, jsonify
 import requests
 import os
+import csv
+import io
 from datetime import datetime, timedelta
 import json
 from functools import wraps
@@ -66,72 +68,108 @@ def fetch_fred_data(series_id):
         print(f"Error fetching {series_id}: {e}")
         return []
 
-def fetch_yahoo_data(ticker):
-    """Fetch data from yfinance or fallback to web scraping"""
-    # First try yfinance
+# --- Fuentes para indicadores que NO son series FRED -----------------------
+# HYG (ETF) y MOVE Index no existen en FRED. Se obtienen de Stooq (CSV diario
+# con histórico) y, como respaldo, del endpoint no oficial de TradingView
+# (sin JavaScript ni Selenium: funciona en el plan gratuito de Render).
+NON_FRED = {
+    "HYG":    {"source": "stooq", "symbol": "hyg.us"},
+    "MMNRNJ": {"source": "stooq", "symbol": "^move",
+               "fallback": ("tradingview", "TVC:MOVE")},
+}
+
+TV_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                   "AppleWebKit/537.36 (KHTML, like Gecko) "
+                   "Chrome/120.0 Safari/537.36"),
+    "Accept": "application/json",
+}
+
+# Cache en memoria para no saturar Stooq/TradingView (rate limits)
+_CACHE = {}
+CACHE_TTL = 600  # segundos (10 min)
+
+def _cached(key, fn):
+    """Devuelve el resultado de fn() cacheado durante CACHE_TTL segundos."""
+    now = datetime.now().timestamp()
+    hit = _CACHE.get(key)
+    if hit and now - hit[0] < CACHE_TTL:
+        return hit[1]
+    value = fn()
+    if value:  # solo se cachean resultados no vacíos
+        _CACHE[key] = (now, value)
+    return value
+
+def fetch_stooq(symbol):
+    """Descarga el CSV diario de Stooq. Devuelve observaciones
+    [{'date','value'}] en orden ascendente, mismo formato que fetch_fred_data()."""
     try:
-        import yfinance as yf
-        print(f"[YFinance] Downloading {ticker}...")
-        cutoff_date = datetime.now() - timedelta(days=90)
-        data = yf.download(ticker, start=cutoff_date.strftime('%Y-%m-%d'), progress=False, timeout=10)
-
-        observations = []
-        if not data.empty and len(data) > 0:
-            for date, row in data.iterrows():
-                try:
-                    observations.append({
-                        'date': date.strftime('%Y-%m-%d'),
-                        'value': float(row['Adj Close'])
-                    })
-                except (ValueError, TypeError):
-                    continue
-            if observations:
-                print(f"[YFinance] ✓ {ticker}: {len(observations)} records retrieved")
-                return observations
-    except Exception as e:
-        print(f"[YFinance] Failed: {str(e)[:60]}")
-
-    # Fallback: Web scraping from investing.com
-    print(f"[Scraping] Attempting web scraping for {ticker}...")
-    try:
-        from bs4 import BeautifulSoup
-
-        investing_urls = {
-            "HYG": "https://www.investing.com/etfs/ishares-h-y-corporate-bond",
-            "MMNRNJ": "https://www.investing.com/indices/move-index"
-        }
-
-        url = investing_urls.get(ticker)
-        if not url:
+        d2 = datetime.now()
+        d1 = d2 - timedelta(days=160)
+        url = (f"https://stooq.com/q/d/l/?s={symbol}&i=d"
+               f"&d1={d1:%Y%m%d}&d2={d2:%Y%m%d}")
+        response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"},
+                                timeout=15)
+        if response.status_code != 200 or "Date,Open" not in response.text:
+            print(f"[Stooq] Sin datos para {symbol}")
             return []
-
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-
-        response = requests.get(url, headers=headers, timeout=10)
-        soup = BeautifulSoup(response.content, 'html.parser')
-
-        # Extract price from investing.com page
-        price_elem = soup.find('span', {'class': ['text-xl', 'last']}) or \
-                    soup.find('span', {'data-test': 'instrument-price'})
-
-        if price_elem:
-            price_text = price_elem.get_text(strip=True).replace(',', '')
-            current_value = float(price_text)
-            today = datetime.now().strftime('%Y-%m-%d')
-
-            observations = [{
-                'date': today,
-                'value': current_value
-            }]
-            print(f"[Scraping] ✓ {ticker}: {current_value}")
-            return observations
+        observations = []
+        for row in csv.DictReader(io.StringIO(response.text)):
+            close = (row.get("Close") or "").strip()
+            if close and close not in (".", "N/D"):
+                observations.append({"date": row["Date"],
+                                     "value": float(close)})
+        print(f"[Stooq] OK {symbol}: {len(observations)} registros")
+        return observations
     except Exception as e:
-        print(f"[Scraping] Failed: {str(e)[:60]}")
+        print(f"[Stooq] Error {symbol}: {str(e)[:60]}")
+        return []
 
-    print(f"[Error] {ticker}: All sources failed")
-    return []
+def fetch_tradingview_quote(symbol):
+    """Endpoint no oficial de TradingView (sin JS ni Selenium).
+    symbol p.ej. 'TVC:MOVE'. Devuelve [{'date','value'}] con un único punto
+    (valor actual), suficiente para mostrar el valor y calcular el status."""
+    try:
+        url = "https://scanner.tradingview.com/symbol"
+        params = {"symbol": symbol, "fields": "close", "no_404": "true"}
+        response = requests.get(url, params=params, headers=TV_HEADERS,
+                                timeout=15)
+        if response.status_code != 200:
+            print(f"[TradingView] {symbol}: HTTP {response.status_code}")
+            return []
+        close = response.json().get("close")
+        if close is None:
+            return []
+        print(f"[TradingView] OK {symbol}: {close}")
+        return [{"date": datetime.now().strftime("%Y-%m-%d"),
+                 "value": float(close)}]
+    except Exception as e:
+        print(f"[TradingView] Error {symbol}: {str(e)[:60]}")
+        return []
+
+def fetch_indicator(indicator_code):
+    """Enruta cada indicador a su fuente: FRED, Stooq o TradingView."""
+    cfg = NON_FRED.get(indicator_code)
+    if not cfg:
+        return fetch_fred_data(indicator_code)
+
+    if cfg["source"] == "stooq":
+        obs = _cached(f"stooq:{cfg['symbol']}",
+                      lambda: fetch_stooq(cfg["symbol"]))
+    else:
+        obs = _cached(f"tv:{cfg['symbol']}",
+                      lambda: fetch_tradingview_quote(cfg["symbol"]))
+
+    # Fallback si la fuente principal no devolvió datos
+    if not obs and "fallback" in cfg:
+        fb_source, fb_symbol = cfg["fallback"]
+        if fb_source == "tradingview":
+            obs = _cached(f"tv:{fb_symbol}",
+                          lambda: fetch_tradingview_quote(fb_symbol))
+        elif fb_source == "stooq":
+            obs = _cached(f"stooq:{fb_symbol}",
+                          lambda: fetch_stooq(fb_symbol))
+    return obs
 
 @app.route('/')
 def index():
@@ -144,12 +182,7 @@ def get_data():
     result = {}
 
     for indicator_code, indicator_name in INDICATORS.items():
-        if indicator_code == "HYG":
-            observations = fetch_yahoo_data("HYG")
-        elif indicator_code == "MMNRNJ":
-            observations = fetch_yahoo_data("^MOVE")
-        else:
-            observations = fetch_fred_data(indicator_code)
+        observations = fetch_indicator(indicator_code)
 
         if observations:
             # Últimos datos
