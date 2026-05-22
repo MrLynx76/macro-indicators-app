@@ -355,12 +355,12 @@
             }
         }
 
-        // Indicadores en dólares. Formato español: miles con punto,
-        // decimales con coma, símbolo $ separado por un espacio.
+        // Indicadores en dólares. Formato US: miles con coma,
+        // decimales con punto, símbolo $ separado por un espacio.
         const CURRENCY_INDICATORS = ['WRESBAL', 'WTREGEN', 'HYG'];
 
-        function formatES(value, decimals) {
-            return value.toLocaleString('es-ES', {
+        function formatUS(value, decimals) {
+            return value.toLocaleString('en-US', {
                 minimumFractionDigits: decimals,
                 maximumFractionDigits: decimals
             });
@@ -373,7 +373,7 @@
                 // WRESBAL/WTREGEN son agregados enormes -> sin decimales.
                 // HYG es un precio de ETF -> 2 decimales.
                 const decimals = (code === 'HYG') ? 2 : 0;
-                return '$ ' + formatES(value, decimals);
+                return '$ ' + formatUS(value, decimals);
             }
             return value.toFixed(2);
         }
@@ -382,7 +382,7 @@
             if (value === null || value === undefined) return 'N/A';
 
             if (CURRENCY_INDICATORS.includes(code)) {
-                return '$ ' + formatES(value, 2);
+                return '$ ' + formatUS(value, 2);
             }
             return value.toFixed(2);
         }
