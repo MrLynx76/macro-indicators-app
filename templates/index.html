@@ -369,6 +369,11 @@
         function formatValue(code, value) {
             if (value === null || value === undefined) return 'N/A';
 
+            // Indicadores con %
+            if (['DGS10', 'BAMLC0A4CBBB'].includes(code)) {
+                return value.toFixed(2) + ' %';
+            }
+
             if (CURRENCY_INDICATORS.includes(code)) {
                 // WRESBAL/WTREGEN son agregados enormes -> sin decimales.
                 // HYG es un precio de ETF -> 2 decimales.

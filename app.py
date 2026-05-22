@@ -27,12 +27,12 @@ THRESHOLDS = {
 }
 
 INDICATORS = {
-    "DGS10": "Rendimiento US Bond 10 años %",
-    "BAMLC0A4CBBB": "Prima de riesgo US Bond BBB OAS %",
+    "DGS10": "Rendimiento US Bond 10 años",
+    "BAMLC0A4CBBB": "Prima de riesgo US Bond BBB OAS",
     "HYG": "iShares iBoxx $ High Yield Corporate Bond ETF",
     "MMNRNJ": "MOVE Index (Volatilidad US Bond)",
-    "WRESBAL": "FRED Reserve Balances (Millions of U.S. Dollars)",
-    "WTREGEN": "FRED Treasury General Account (Millions of U.S. Dollars)",
+    "WRESBAL": "FRED U.S. Reserve Balances (Millions of $)",
+    "WTREGEN": "FRED U.S. Treasury General Account (Millions of $)",
 }
 
 def check_auth(f):
