@@ -22,7 +22,7 @@ THRESHOLDS = {
     "BAMLC0A4CBBB": {"normal": (0, 1.05), "tension": (1.05, 1.15), "crisis": (1.15, 100)},
     "HYG": {"normal": (80, 10000), "tension": (78.5, 80), "crisis": (0, 78.5)},
     "MMNRNJ": {"normal": (0, 200), "tension": (80, 120), "crisis": (120, 500)},
-    "WRESBAL": {"normal": (3.1, 100000), "tension": (2.9, 3.1), "crisis": (0, 2.9)},
+    "WRESBAL": {"normal": (3100000, 100000000), "tension": (2900000, 3100000), "crisis": (0, 2900000)},
     "WTREGEN": {"normal": (0, 800000), "tension": (800000, 900000), "crisis": (900000, 10000000)},
 }
 
@@ -31,8 +31,8 @@ INDICATORS = {
     "BAMLC0A4CBBB": "Prima de riesgo US Bond BBB OAS",
     "HYG": "iShares iBoxx $ High Yield Corporate Bond ETF",
     "MMNRNJ": "MOVE Index (Volatilidad US Bond)",
-    "WRESBAL": "FRED U.S. Reserve Balances (Millions of $)",
-    "WTREGEN": "FRED U.S. Treasury General Account (Millions of $)",
+    "WRESBAL": "U.S. Reserve Balances (Millions of $)",
+    "WTREGEN": "U.S. Treasury General Account (Millions of $)",
 }
 
 def check_auth(f):
