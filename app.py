@@ -22,8 +22,8 @@ THRESHOLDS = {
     "BAMLC0A4CBBB": {"normal": (0, 1.05), "tension": (1.05, 1.15), "crisis": (1.15, 100)},
     "HYG": {"normal": (80, 10000), "tension": (78.5, 80), "crisis": (0, 78.5)},
     "MMNRNJ": {"normal": (0, 200), "tension": (80, 120), "crisis": (120, 500)},
-    "WRESBAL": {"normal": (3000, 100000), "tension": (2800, 3000), "crisis": (0, 2800)},
-    "WTREGEN": {"normal": (0, 700), "tension": (700, 900), "crisis": (900, 10000)},
+    "WRESBAL": {"normal": (3.1, 100000), "tension": (2.9, 3.1), "crisis": (0, 2.9)},
+    "WTREGEN": {"normal": (0, 800000), "tension": (800000, 900000), "crisis": (900000, 10000000)},
 }
 
 INDICATORS = {
