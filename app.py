@@ -1,10 +1,11 @@
 from flask import Flask, render_template, request, jsonify
 import requests
 import os
-import csv
-import io
-from datetime import datetime, timedelta
 import json
+import random
+import string
+import time
+from datetime import datetime, timedelta
 from functools import wraps
 from concurrent.futures import ThreadPoolExecutor
 
@@ -70,13 +71,13 @@ def fetch_fred_data(series_id):
         return []
 
 # --- Fuentes para indicadores que NO son series FRED -----------------------
-# HYG (ETF) y MOVE Index no existen en FRED. Se obtienen de Stooq (CSV diario
-# con histórico) y, como respaldo, del endpoint no oficial de TradingView
-# (sin JavaScript ni Selenium: funciona en el plan gratuito de Render).
+# HYG (ETF) y MOVE Index no existen en FRED, y Stooq bloquea las IPs de
+# datacenter (Render) -> "Max retries exceeded". Se obtienen de TradingView,
+# que sí responde desde Render: el histórico diario por su feed websocket y,
+# como respaldo, el valor actual por su endpoint REST.
 NON_FRED = {
-    "HYG":    {"source": "stooq", "symbol": "hyg.us"},
-    "MMNRNJ": {"source": "stooq", "symbol": "^move",
-               "fallback": ("tradingview", "TVC:MOVE")},
+    "HYG":    {"tv_symbol": "AMEX:HYG"},
+    "MMNRNJ": {"tv_symbol": "TVC:MOVE"},
 }
 
 TV_HEADERS = {
@@ -86,7 +87,7 @@ TV_HEADERS = {
     "Accept": "application/json",
 }
 
-# Cache en memoria para no saturar Stooq/TradingView (rate limits)
+# Cache en memoria para no saturar TradingView (rate limits / reconexiones)
 _CACHE = {}
 CACHE_TTL = 600  # segundos (10 min)
 
@@ -101,76 +102,156 @@ def _cached(key, fn):
         _CACHE[key] = (now, value)
     return value
 
-def fetch_stooq(symbol):
-    """Descarga el CSV diario de Stooq. Devuelve observaciones
-    [{'date','value'}] en orden ascendente, mismo formato que fetch_fred_data()."""
-    try:
-        d2 = datetime.now()
-        d1 = d2 - timedelta(days=160)
-        url = (f"https://stooq.com/q/d/l/?s={symbol}&i=d"
-               f"&d1={d1:%Y%m%d}&d2={d2:%Y%m%d}")
-        response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"},
-                                timeout=8)
-        if response.status_code != 200 or "Date,Open" not in response.text:
-            print(f"[Stooq] Sin datos para {symbol}")
-            return []
-        observations = []
-        for row in csv.DictReader(io.StringIO(response.text)):
-            close = (row.get("Close") or "").strip()
-            if close and close not in (".", "N/D"):
-                observations.append({"date": row["Date"],
-                                     "value": float(close)})
-        print(f"[Stooq] OK {symbol}: {len(observations)} registros")
-        return observations
-    except Exception as e:
-        print(f"[Stooq] Error {symbol}: {str(e)[:60]}")
-        return []
-
 def fetch_tradingview_quote(symbol):
-    """Endpoint no oficial de TradingView (sin JS ni Selenium).
-    symbol p.ej. 'TVC:MOVE'. Devuelve [{'date','value'}] con un único punto
-    (valor actual), suficiente para mostrar el valor y calcular el status."""
+    """Endpoint REST no oficial de TradingView. Devuelve [{'date','value'}]
+    con un único punto (valor actual). Respaldo si el histórico falla."""
     try:
         url = "https://scanner.tradingview.com/symbol"
         params = {"symbol": symbol, "fields": "close", "no_404": "true"}
         response = requests.get(url, params=params, headers=TV_HEADERS,
                                 timeout=8)
         if response.status_code != 200:
-            print(f"[TradingView] {symbol}: HTTP {response.status_code}")
+            print(f"[TradingView-REST] {symbol}: HTTP {response.status_code}")
             return []
         close = response.json().get("close")
         if close is None:
             return []
-        print(f"[TradingView] OK {symbol}: {close}")
+        print(f"[TradingView-REST] OK {symbol}: {close}")
         return [{"date": datetime.now().strftime("%Y-%m-%d"),
                  "value": float(close)}]
     except Exception as e:
-        print(f"[TradingView] Error {symbol}: {str(e)[:60]}")
+        print(f"[TradingView-REST] Error {symbol}: {str(e)[:60]}")
         return []
 
+# --- Histórico diario de TradingView vía websocket -------------------------
+# TradingView sirve los datos de gráfico por un websocket con un protocolo
+# de tramas "~m~<longitud>~m~<contenido>". No requiere API key ni navegador.
+
+def _tv_build_msg(func, params):
+    """Construye una trama del protocolo TradingView: ~m~<len>~m~<json>."""
+    body = json.dumps({"m": func, "p": params}, separators=(",", ":"))
+    return f"~m~{len(body)}~m~{body}"
+
+def _tv_iter_frames(buffer):
+    """Itera las tramas ~m~<longitud>~m~<contenido> de un mensaje recibido."""
+    i, n = 0, len(buffer)
+    while i < n:
+        if buffer[i:i + 3] != "~m~":
+            break
+        j = buffer.find("~m~", i + 3)
+        if j == -1:
+            break
+        try:
+            length = int(buffer[i + 3:j])
+        except ValueError:
+            break
+        start = j + 3
+        yield buffer[start:start + length]
+        i = start + length
+
+def _tv_extract_bars(data, into):
+    """Extrae las barras OHLC de un mensaje 'timescale_update' al dict 'into'
+    (clave = timestamp unix, valor = cierre)."""
+    if not isinstance(data, dict) or data.get("m") != "timescale_update":
+        return
+    try:
+        series = data["p"][1].get("sds_1", {})
+    except (IndexError, KeyError, TypeError):
+        return
+    for item in series.get("s", []):
+        v = item.get("v", [])
+        # v = [timestamp, open, high, low, close, volume]
+        if len(v) >= 5 and v[0] is not None and v[4] is not None:
+            into[int(v[0])] = float(v[4])
+
+def fetch_tradingview_history(symbol, bars=150):
+    """Obtiene el histórico diario de TradingView por websocket.
+    symbol: p.ej. 'AMEX:HYG' o 'TVC:MOVE'.
+    Devuelve [{'date','value'}] en orden ascendente, o [] si algo falla.
+    Nunca lanza excepción: ante cualquier fallo registra el error y
+    devuelve [] para que se use el respaldo REST."""
+    try:
+        import websocket  # paquete 'websocket-client'
+    except ImportError:
+        print("[TradingView-WS] Falta el paquete 'websocket-client'")
+        return []
+
+    ws = None
+    try:
+        ws = websocket.create_connection(
+            "wss://data.tradingview.com/socket.io/websocket",
+            timeout=8,
+            origin="https://www.tradingview.com",
+            header=["User-Agent: Mozilla/5.0"],
+        )
+        session = "cs_" + "".join(
+            random.choices(string.ascii_lowercase + string.digits, k=12))
+        ws.send(_tv_build_msg("set_auth_token", ["unauthorized_user_token"]))
+        ws.send(_tv_build_msg("chart_create_session", [session, ""]))
+        ws.send(_tv_build_msg("resolve_symbol", [
+            session, "sym_1",
+            '={"symbol":"%s","adjustment":"splits"}' % symbol]))
+        ws.send(_tv_build_msg("create_series", [
+            session, "sds_1", "s1", "sym_1", "1D", bars, ""]))
+
+        bars_by_ts = {}
+        deadline = time.time() + 8
+        while time.time() < deadline:
+            try:
+                chunk = ws.recv()
+            except Exception:
+                break
+            if not chunk:
+                continue
+            for frame in _tv_iter_frames(chunk):
+                if frame.startswith("~h~"):  # heartbeat: devolverlo igual
+                    ws.send(f"~m~{len(frame)}~m~{frame}")
+                    continue
+                if not frame.startswith("{"):
+                    continue
+                try:
+                    data = json.loads(frame)
+                except Exception:
+                    continue
+                _tv_extract_bars(data, bars_by_ts)
+            if "series_completed" in chunk:
+                break
+
+        observations = [
+            {"date": datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d"),
+             "value": val}
+            for ts, val in sorted(bars_by_ts.items())
+        ]
+        if observations:
+            print(f"[TradingView-WS] OK {symbol}: {len(observations)} barras")
+        else:
+            print(f"[TradingView-WS] Sin datos para {symbol}")
+        return observations
+    except Exception as e:
+        print(f"[TradingView-WS] Error {symbol}: {str(e)[:90]}")
+        return []
+    finally:
+        if ws is not None:
+            try:
+                ws.close()
+            except Exception:
+                pass
+
 def fetch_indicator(indicator_code):
-    """Enruta cada indicador a su fuente: FRED, Stooq o TradingView."""
+    """Enruta cada indicador a su fuente: FRED o TradingView."""
     cfg = NON_FRED.get(indicator_code)
     if not cfg:
         return fetch_fred_data(indicator_code)
 
-    if cfg["source"] == "stooq":
-        obs = _cached(f"stooq:{cfg['symbol']}",
-                      lambda: fetch_stooq(cfg["symbol"]))
-    else:
-        obs = _cached(f"tv:{cfg['symbol']}",
-                      lambda: fetch_tradingview_quote(cfg["symbol"]))
-
-    # Fallback si la fuente principal no devolvió datos
-    if not obs and "fallback" in cfg:
-        fb_source, fb_symbol = cfg["fallback"]
-        if fb_source == "tradingview":
-            obs = _cached(f"tv:{fb_symbol}",
-                          lambda: fetch_tradingview_quote(fb_symbol))
-        elif fb_source == "stooq":
-            obs = _cached(f"stooq:{fb_symbol}",
-                          lambda: fetch_stooq(fb_symbol))
-    return obs
+    tv_symbol = cfg["tv_symbol"]
+    # 1) Histórico diario completo vía websocket.
+    obs = _cached(f"tvh:{tv_symbol}",
+                  lambda: fetch_tradingview_history(tv_symbol))
+    if obs:
+        return obs
+    # 2) Respaldo: valor actual vía REST (al menos muestra el dato de hoy).
+    return _cached(f"tvq:{tv_symbol}",
+                   lambda: fetch_tradingview_quote(tv_symbol))
 
 @app.route('/')
 def index():
