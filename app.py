@@ -27,12 +27,14 @@ THRESHOLDS = {
 }
 
 INDICATORS = {
+    # Fila superior (izquierda a derecha)
     "DGS10": "Rendimiento US Bond 10 años",
-    "BAMLC0A4CBBB": "Prima de riesgo US Bond BBB OAS",
-    "HYG": "iShares iBoxx $ High Yield Corporate Bond ETF",
-    "MMNRNJ": "MOVE Index (Volatilidad US Bond)",
     "WRESBAL": "U.S. Reserve Balances (Millions of $)",
     "WTREGEN": "U.S. Treasury General Account (Millions of $)",
+    # Fila inferior (izquierda a derecha)
+    "MMNRNJ": "MOVE Index (Volatilidad US Bond)",
+    "BAMLC0A4CBBB": "Prima de riesgo US Bond BBB OAS",
+    "HYG": "iShares iBoxx $ High Yield Corporate Bond ETF",
 }
 
 def check_auth(f):
