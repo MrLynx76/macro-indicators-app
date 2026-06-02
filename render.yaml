@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: macro-indicators-app
+    runtime: python
+    pythonVersion: 3.10
+    startCommand: gunicorn app:app
+    envVars:
+      - key: FRED_API_KEY
+        value: 600659e552d46dc11204cbe1e8659eb5
+      - key: PYTHON_VERSION
+        value: 3.10
