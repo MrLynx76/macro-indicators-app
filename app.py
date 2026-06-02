@@ -56,19 +56,28 @@ def get_status(value, indicator):
         return "green"
     return "gray"
 
+def _fetch_fred_data_uncached(series_id):
+    """Llama a la API de FRED con un reintento corto y timeout amplio.
+    Devuelve la lista de observaciones o [] si falla."""
+    url = (f"https://api.stlouisfed.org/fred/series/observations"
+           f"?series_id={series_id}&api_key={FRED_API_KEY}&file_type=json")
+    for attempt in (1, 2):
+        try:
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                obs = response.json().get('observations', [])
+                print(f"[FRED] OK {series_id}: {len(obs)} obs")
+                return obs
+            print(f"[FRED] {series_id}: HTTP {response.status_code} (intento {attempt})")
+        except Exception as e:
+            print(f"[FRED] Error {series_id} (intento {attempt}): {str(e)[:60]}")
+    return []
+
 def fetch_fred_data(series_id):
-    """Fetch data from FRED API"""
-    try:
-        url = f"https://api.stlouisfed.org/fred/series/observations?series_id={series_id}&api_key={FRED_API_KEY}&file_type=json"
-        response = requests.get(url, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
-            observations = data.get('observations', [])
-            return observations
-        return []
-    except Exception as e:
-        print(f"Error fetching {series_id}: {e}")
-        return []
+    """FRED con cache de 10 min. Evita que un fallo puntual de la API
+    haga desaparecer indicadores entre refrescos."""
+    return _cached(f"fred:{series_id}",
+                   lambda: _fetch_fred_data_uncached(series_id))
 
 # --- Fuentes para indicadores que NO son series FRED -----------------------
 # HYG (ETF) y MOVE Index no existen en FRED, y Stooq bloquea las IPs de
@@ -299,7 +308,6 @@ def process_observations(indicator_code, indicator_name, observations):
     }
 
 @app.route('/api/data', methods=['GET'])
-@check_auth
 def get_data():
     """Retorna datos de todos los indicadores.
     SIEMPRE devuelve JSON válido (status 200), aunque alguna fuente falle:
@@ -327,13 +335,11 @@ def get_data():
     return jsonify(result)
 
 @app.route('/api/thresholds', methods=['GET'])
-@check_auth
 def get_thresholds():
     """Retorna umbrales actuales"""
     return jsonify(THRESHOLDS)
 
 @app.route('/api/thresholds', methods=['POST'])
-@check_auth
 def update_thresholds():
     """Actualiza umbrales"""
     global THRESHOLDS

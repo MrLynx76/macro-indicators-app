@@ -266,7 +266,7 @@
     </style>
 </head>
 <body>
-    <div class="login-screen" id="loginScreen">
+    <div class="login-screen" id="loginScreen" style="display:none">
         <div class="login-box">
             <h1>Macro Indicators</h1>
             <input type="password" id="passwordInput" placeholder="Contraseña" />
@@ -274,14 +274,13 @@
         </div>
     </div>
 
-    <div class="dashboard" id="dashboard">
+    <div class="dashboard" id="dashboard" style="display:block">
         <div class="container">
             <div class="header">
                 <h1>Macro Indicators Monitor</h1>
                 <div class="controls">
                     <button onclick="fetchData()">Actualizar</button>
                     <button class="secondary" onclick="openThresholds()">Umbrales</button>
-                    <button class="secondary" onclick="logout()">Salir</button>
                 </div>
             </div>
 
@@ -580,10 +579,12 @@
             }
         }
 
-        // Enter para login
-        document.getElementById('passwordInput').addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') login();
-        });
+        // Sin contraseña: cargar los datos en cuanto la página esté lista.
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', fetchData);
+        } else {
+            fetchData();
+        }
     </script>
 </body>
 </html>
