@@ -10,6 +10,10 @@ from functools import wraps
 from concurrent.futures import ThreadPoolExecutor
 
 app = Flask(__name__)
+# Preservar el orden de inserción de los indicadores en las respuestas JSON
+# (Flask ordena claves alfabéticamente por defecto). Esto hace que el orden
+# del dict INDICATORS sea el orden visible en el dashboard.
+app.json.sort_keys = False
 
 # Configuración
 PASSWORD = "Temporal1$"
@@ -20,21 +24,29 @@ POLYGON_API_KEY = os.environ.get('POLYGON_API_KEY', 'your_polygon_api_key_here')
 THRESHOLDS = {
     "DGS10": {"normal": (0, 4.5), "tension": (4.51, 4.65), "crisis": (4.66, 100)},
     "BAMLC0A4CBBB": {"normal": (0, 1.05), "tension": (1.05, 1.15), "crisis": (1.15, 100)},
+    "BAMLH0A0HYM2": {"normal": (0, 4.5), "tension": (4.5, 6.5), "crisis": (6.5, 100)},
     "HYG": {"normal": (80, 10000), "tension": (78.5, 80), "crisis": (0, 78.5)},
     "MMNRNJ": {"normal": (0, 200), "tension": (80, 120), "crisis": (120, 500)},
     "WRESBAL": {"normal": (3100000, 100000000), "tension": (2900000, 3100000), "crisis": (0, 2900000)},
     "WTREGEN": {"normal": (0, 800000), "tension": (800000, 900000), "crisis": (900000, 10000000)},
+    # F&G: la banda alta (codicia extrema) suele anticipar techos.
+    "FG_STOCKS": {"normal": (0, 75), "tension": (75, 85), "crisis": (85, 100)},
+    "FG_CRYPTO": {"normal": (0, 75), "tension": (75, 85), "crisis": (85, 100)},
 }
 
 INDICATORS = {
-    # Fila superior (izquierda a derecha)
+    # Fila 1 (izquierda a derecha)
+    "BAMLC0A4CBBB": "Prima de riesgo US Bond BBB OAS",
+    "BAMLH0A0HYM2": "Prima de riesgo US Bond HY OAS",
+    "HYG": "iShares iBoxx $ High Yield Corporate Bond ETF",
+    # Fila 2 (izquierda a derecha)
     "DGS10": "Rendimiento US Bond 10 años",
     "WRESBAL": "U.S. Reserve Balances (Millions of $)",
     "WTREGEN": "U.S. Treasury General Account (Millions of $)",
-    # Fila inferior (izquierda a derecha)
+    # Fila 3 (izquierda a derecha)
     "MMNRNJ": "MOVE Index (Volatilidad US Bond)",
-    "BAMLC0A4CBBB": "Prima de riesgo US Bond BBB OAS",
-    "HYG": "iShares iBoxx $ High Yield Corporate Bond ETF",
+    "FG_STOCKS": "Índice Codicia y Miedo Stocks (CNN)",
+    "FG_CRYPTO": "Índice Codicia y Miedo Crypto",
 }
 
 def check_auth(f):
@@ -87,9 +99,15 @@ def fetch_fred_data(series_id):
 # que sí responde desde Render: el histórico diario por su feed websocket y,
 # como respaldo, el valor actual por su endpoint REST.
 NON_FRED = {
-    "HYG":    {"tv_symbol": "AMEX:HYG"},
-    "MMNRNJ": {"tv_symbol": "TVC:MOVE"},
+    "HYG":       {"source": "tv", "symbol": "AMEX:HYG"},
+    "MMNRNJ":    {"source": "tv", "symbol": "TVC:MOVE"},
+    "FG_STOCKS": {"source": "cnn_fg"},
+    "FG_CRYPTO": {"source": "altme_fg"},
 }
+
+# Indicadores Fear & Greed: muestran "semana anterior / día anterior / hoy"
+# en vez de los 3 últimos valores, y cada valor lleva su clasificación.
+FG_INDICATORS = {"FG_STOCKS", "FG_CRYPTO"}
 
 TV_HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -248,44 +266,158 @@ def fetch_tradingview_history(symbol, bars=150):
             except Exception:
                 pass
 
+# --- Fear & Greed indices --------------------------------------------------
+# CNN expone un endpoint JSON no oficial pero estable; alternative.me tiene
+# API oficial gratuita. Los dos responden desde Render. Cada observación
+# lleva su clasificación textual (Miedo extremo / Miedo / Neutral / Codicia
+# / Codicia extrema).
+
+_FG_BANDS = [
+    (24, "Miedo extremo"),
+    (44, "Miedo"),
+    (55, "Neutral"),
+    (74, "Codicia"),
+    (100, "Codicia extrema"),
+]
+
+def _fg_rating_es(value):
+    """Clasificación en español del valor (0-100) de un F&G index."""
+    v = int(round(value))
+    for top, label in _FG_BANDS:
+        if v <= top:
+            return label
+    return "Codicia extrema"
+
+def fetch_cnn_fear_greed():
+    """Fear & Greed Index de CNN (stocks). Endpoint no oficial pero estable.
+    Devuelve observaciones diarias [{'date','value','rating'}] ascendente."""
+    try:
+        url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"},
+                         timeout=10)
+        if r.status_code != 200:
+            print(f"[CNN-FG] HTTP {r.status_code}")
+            return []
+        hist = (r.json().get("fear_and_greed_historical") or {}).get("data", [])
+        observations = []
+        for point in hist:
+            try:
+                ts_ms = point["x"]            # ms desde epoch
+                value = float(point["y"])     # 0-100
+                date_str = datetime.utcfromtimestamp(ts_ms / 1000).strftime("%Y-%m-%d")
+                observations.append({"date": date_str,
+                                     "value": value,
+                                     "rating": _fg_rating_es(value)})
+            except Exception:
+                continue
+        observations.sort(key=lambda o: o["date"])
+        print(f"[CNN-FG] OK: {len(observations)} obs")
+        return observations
+    except Exception as e:
+        print(f"[CNN-FG] Error: {str(e)[:80]}")
+        return []
+
+def fetch_crypto_fear_greed():
+    """Crypto Fear & Greed Index de alternative.me (API oficial gratuita)."""
+    try:
+        url = "https://api.alternative.me/fng/?limit=120&format=json"
+        r = requests.get(url, timeout=10)
+        if r.status_code != 200:
+            print(f"[Crypto-FG] HTTP {r.status_code}")
+            return []
+        observations = []
+        for point in r.json().get("data", []):
+            try:
+                ts = int(point["timestamp"])
+                value = float(point["value"])
+                date_str = datetime.utcfromtimestamp(ts).strftime("%Y-%m-%d")
+                observations.append({"date": date_str,
+                                     "value": value,
+                                     "rating": _fg_rating_es(value)})
+            except Exception:
+                continue
+        observations.sort(key=lambda o: o["date"])
+        print(f"[Crypto-FG] OK: {len(observations)} obs")
+        return observations
+    except Exception as e:
+        print(f"[Crypto-FG] Error: {str(e)[:80]}")
+        return []
+
 def fetch_indicator(indicator_code):
-    """Enruta cada indicador a su fuente: FRED o TradingView."""
+    """Enruta cada indicador a su fuente: FRED, TradingView o F&G."""
     cfg = NON_FRED.get(indicator_code)
     if not cfg:
         return fetch_fred_data(indicator_code)
 
-    tv_symbol = cfg["tv_symbol"]
-    # 1) Histórico diario completo vía websocket.
-    obs = _cached(f"tvh:{tv_symbol}",
-                  lambda: fetch_tradingview_history(tv_symbol))
-    if obs:
-        return obs
-    # 2) Respaldo: valor actual vía REST (al menos muestra el dato de hoy).
-    return _cached(f"tvq:{tv_symbol}",
-                   lambda: fetch_tradingview_quote(tv_symbol))
+    source = cfg["source"]
+    if source == "tv":
+        sym = cfg["symbol"]
+        obs = _cached(f"tvh:{sym}", lambda: fetch_tradingview_history(sym))
+        if obs:
+            return obs
+        return _cached(f"tvq:{sym}", lambda: fetch_tradingview_quote(sym))
+    if source == "cnn_fg":
+        return _cached("cnn_fg", fetch_cnn_fear_greed)
+    if source == "altme_fg":
+        return _cached("altme_fg", fetch_crypto_fear_greed)
+    return []
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
+def _select_fg_last_three(observations):
+    """Para F&G: devuelve [semana anterior, día anterior, hoy] con etiqueta."""
+    valid = [o for o in observations
+             if o.get('value') is not None and o.get('value') != '.']
+    if not valid:
+        return []
+    today = valid[-1]
+    day_before = valid[-2] if len(valid) >= 2 else today
+
+    target = datetime.strptime(today['date'], '%Y-%m-%d') - timedelta(days=7)
+    candidates = valid[:-1] or [today]
+    week_ago = min(candidates,
+                   key=lambda o: abs(
+                       (datetime.strptime(o['date'], '%Y-%m-%d') - target).days))
+
+    def _item(obs, label):
+        out = {'label': label, 'date': obs['date'],
+               'value': float(obs['value'])}
+        if 'rating' in obs:
+            out['rating'] = obs['rating']
+        return out
+
+    return [_item(week_ago, 'Semana anterior'),
+            _item(day_before, 'Día anterior'),
+            _item(today, 'Hoy')]
+
 def process_observations(indicator_code, indicator_name, observations):
     """Convierte las observaciones de un indicador al formato de salida.
-    Devuelve None si no hay datos utilizables."""
+    Devuelve None si no hay datos utilizables.
+    Para indicadores F&G, la tabla cambia a semana/día/hoy y cada valor
+    lleva su rating; también añade 'current_rating' al resultado."""
     if not observations:
         return None
 
     last_obs = observations[-1]
     current_value = float(last_obs['value']) if last_obs['value'] != '.' else None
     last_date = last_obs['date']
+    current_rating = last_obs.get('rating')
 
-    # Últimos 3 valores
-    last_three = []
-    for obs in observations[-3:]:
-        if obs['value'] != '.':
-            last_three.append({'date': obs['date'],
-                               'value': float(obs['value'])})
+    # Tabla de 3 valores
+    if indicator_code in FG_INDICATORS:
+        last_three = _select_fg_last_three(observations)
+    else:
+        last_three = []
+        for obs in observations[-3:]:
+            if obs['value'] != '.':
+                item = {'date': obs['date'], 'value': float(obs['value'])}
+                if 'rating' in obs:
+                    item['rating'] = obs['rating']
+                last_three.append(item)
 
-    # Últimos 3 meses
+    # Gráfico de los últimos 3 meses
     cutoff_date = datetime.now() - timedelta(days=90)
     year_data = []
     for obs in observations:
@@ -300,7 +432,7 @@ def process_observations(indicator_code, indicator_name, observations):
 
     status = get_status(current_value, indicator_code) if current_value else "gray"
 
-    return {
+    result = {
         'name': indicator_name,
         'current': current_value,
         'date': last_date,
@@ -308,6 +440,9 @@ def process_observations(indicator_code, indicator_name, observations):
         'year_data': year_data,
         'status': status,
     }
+    if current_rating:
+        result['current_rating'] = current_rating
+    return result
 
 @app.route('/api/data', methods=['GET'])
 def get_data():
