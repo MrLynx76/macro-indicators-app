@@ -290,32 +290,50 @@ def _fg_rating_es(value):
 
 def fetch_cnn_fear_greed():
     """Fear & Greed Index de CNN (stocks). Endpoint no oficial pero estable.
+    CNN exige cabeceras de navegador y suele responder mejor a la ruta con
+    fecha; si esa falla, intenta la ruta sin fecha como respaldo.
     Devuelve observaciones diarias [{'date','value','rating'}] ascendente."""
-    try:
-        url = "https://production.dataviz.cnn.io/index/fearandgreed/graphdata"
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"},
-                         timeout=10)
-        if r.status_code != 200:
-            print(f"[CNN-FG] HTTP {r.status_code}")
-            return []
-        hist = (r.json().get("fear_and_greed_historical") or {}).get("data", [])
-        observations = []
-        for point in hist:
-            try:
-                ts_ms = point["x"]            # ms desde epoch
-                value = float(point["y"])     # 0-100
-                date_str = datetime.utcfromtimestamp(ts_ms / 1000).strftime("%Y-%m-%d")
-                observations.append({"date": date_str,
-                                     "value": value,
-                                     "rating": _fg_rating_es(value)})
-            except Exception:
+    headers = {
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/120.0 Safari/537.36"),
+        "Accept": "application/json, text/plain, */*",
+        "Origin": "https://www.cnn.com",
+        "Referer": "https://www.cnn.com/",
+    }
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    urls = [
+        f"https://production.dataviz.cnn.io/index/fearandgreed/graphdata/{today}",
+        "https://production.dataviz.cnn.io/index/fearandgreed/graphdata",
+    ]
+    for url in urls:
+        tag = url.rsplit("/", 1)[-1] or "graphdata"
+        try:
+            r = requests.get(url, headers=headers, timeout=10)
+            print(f"[CNN-FG] GET .../{tag} -> HTTP {r.status_code}")
+            if r.status_code != 200:
                 continue
-        observations.sort(key=lambda o: o["date"])
-        print(f"[CNN-FG] OK: {len(observations)} obs")
-        return observations
-    except Exception as e:
-        print(f"[CNN-FG] Error: {str(e)[:80]}")
-        return []
+            payload = r.json()
+            hist = (payload.get("fear_and_greed_historical") or {}).get("data", [])
+            observations = []
+            for point in hist:
+                try:
+                    ts_ms = point["x"]            # ms desde epoch
+                    value = float(point["y"])     # 0-100
+                    date_str = datetime.utcfromtimestamp(ts_ms / 1000).strftime("%Y-%m-%d")
+                    observations.append({"date": date_str,
+                                         "value": value,
+                                         "rating": _fg_rating_es(value)})
+                except Exception:
+                    continue
+            observations.sort(key=lambda o: o["date"])
+            if observations:
+                print(f"[CNN-FG] OK ({tag}): {len(observations)} obs")
+                return observations
+            print(f"[CNN-FG] 200 OK pero histórico vacío en {tag}")
+        except Exception as e:
+            print(f"[CNN-FG] Error en {tag}: {str(e)[:80]}")
+    return []
 
 def fetch_crypto_fear_greed():
     """Crypto Fear & Greed Index de alternative.me (API oficial gratuita)."""
