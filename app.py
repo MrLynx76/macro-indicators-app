@@ -37,16 +37,16 @@ THRESHOLDS = {
 INDICATORS = {
     # Fila 1 (izquierda a derecha)
     "BAMLC0A4CBBB": "Prima de riesgo US Bond BBB OAS",
-    "BAMLH0A0HYM2": "Prima de riesgo US Bond HY OAS",
+    "BAMLH0A0HYM2": "Prima de riesgo US Bond High Yield OAS",
     "HYG": "iShares iBoxx $ High Yield Corporate Bond ETF",
     # Fila 2 (izquierda a derecha)
     "DGS10": "Rendimiento US Bond 10 años",
     "WRESBAL": "U.S. Reserve Balances (Millions of $)",
     "WTREGEN": "U.S. Treasury General Account (Millions of $)",
     # Fila 3 (izquierda a derecha)
-    "MMNRNJ": "MOVE Index (Volatilidad US Bond)",
+    "MMNRNJ": "Indice MOVE (Volatilidad US Bond)",
     "FG_STOCKS": "Índice Codicia y Miedo Stocks (CNN)",
-    "FG_CRYPTO": "Índice Codicia y Miedo Crypto",
+    "FG_CRYPTO": "Índice Codicia y Miedo Crypto (Alternative)",
 }
 
 def check_auth(f):
