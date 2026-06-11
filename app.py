@@ -330,7 +330,11 @@ def fetch_cnn_fear_greed():
                                          "rating": _fg_rating_es(value)})
                 except Exception:
                     continue
+            # CNN puede emitir varios puntos para el mismo día (actualiza
+            # intradía). Nos quedamos con el último valor de cada fecha.
             observations.sort(key=lambda o: o["date"])
+            deduped = {o["date"]: o for o in observations}
+            observations = list(deduped.values())
             print(f"[CNN-FG] GET .../{tag} -> HTTP 200, {len(observations)} puntos")
             # Necesitamos histórico real (>5 días) para que la tarjeta
             # tenga sentido. Si esta URL solo trae 1-2 puntos, probamos otra.
@@ -395,17 +399,29 @@ def index():
     return render_template('index.html')
 
 def _select_fg_last_three(observations):
-    """Para F&G: devuelve [semana anterior, día anterior, hoy] con etiqueta."""
+    """Para F&G: devuelve [semana anterior, día anterior, hoy] con etiqueta.
+    Cada uno debe tener una fecha distinta — si la fuente repite puntos
+    para el mismo día, los saltamos."""
     valid = [o for o in observations
              if o.get('value') is not None and o.get('value') != '.']
     if not valid:
         return []
     today = valid[-1]
-    day_before = valid[-2] if len(valid) >= 2 else today
+    today_date = today['date']
 
-    target = datetime.strptime(today['date'], '%Y-%m-%d') - timedelta(days=7)
-    candidates = valid[:-1] or [today]
-    week_ago = min(candidates,
+    # Día anterior = observación más reciente con fecha distinta a hoy.
+    day_before = today
+    for o in reversed(valid[:-1]):
+        if o['date'] != today_date:
+            day_before = o
+            break
+
+    # Semana anterior = la más cercana a hoy - 7 días, evitando
+    # las fechas de "hoy" y "día anterior".
+    target = datetime.strptime(today_date, '%Y-%m-%d') - timedelta(days=7)
+    exclude = {today_date, day_before['date']}
+    week_candidates = [o for o in valid if o['date'] not in exclude] or [today]
+    week_ago = min(week_candidates,
                    key=lambda o: abs(
                        (datetime.strptime(o['date'], '%Y-%m-%d') - target).days))
 
