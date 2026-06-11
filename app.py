@@ -302,16 +302,20 @@ def fetch_cnn_fear_greed():
         "Referer": "https://www.cnn.com/",
     }
     today = datetime.utcnow().strftime("%Y-%m-%d")
+    # La ruta SIN fecha trae el histórico completo (~250 días).
+    # La ruta CON fecha solo devuelve el snapshot de ese día, así que la
+    # dejamos como último recurso por si la otra falla.
     urls = [
-        f"https://production.dataviz.cnn.io/index/fearandgreed/graphdata/{today}",
         "https://production.dataviz.cnn.io/index/fearandgreed/graphdata",
+        f"https://production.dataviz.cnn.io/index/fearandgreed/graphdata/{today}",
     ]
+    best = []
     for url in urls:
         tag = url.rsplit("/", 1)[-1] or "graphdata"
         try:
             r = requests.get(url, headers=headers, timeout=10)
-            print(f"[CNN-FG] GET .../{tag} -> HTTP {r.status_code}")
             if r.status_code != 200:
+                print(f"[CNN-FG] GET .../{tag} -> HTTP {r.status_code}")
                 continue
             payload = r.json()
             hist = (payload.get("fear_and_greed_historical") or {}).get("data", [])
@@ -327,13 +331,19 @@ def fetch_cnn_fear_greed():
                 except Exception:
                     continue
             observations.sort(key=lambda o: o["date"])
-            if observations:
+            print(f"[CNN-FG] GET .../{tag} -> HTTP 200, {len(observations)} puntos")
+            # Necesitamos histórico real (>5 días) para que la tarjeta
+            # tenga sentido. Si esta URL solo trae 1-2 puntos, probamos otra.
+            if len(observations) > 5:
                 print(f"[CNN-FG] OK ({tag}): {len(observations)} obs")
                 return observations
-            print(f"[CNN-FG] 200 OK pero histórico vacío en {tag}")
+            if len(observations) > len(best):
+                best = observations
         except Exception as e:
             print(f"[CNN-FG] Error en {tag}: {str(e)[:80]}")
-    return []
+    if best:
+        print(f"[CNN-FG] Aviso: solo {len(best)} punto(s) disponibles")
+    return best
 
 def fetch_crypto_fear_greed():
     """Crypto Fear & Greed Index de alternative.me (API oficial gratuita)."""
