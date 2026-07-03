@@ -34,6 +34,13 @@ THRESHOLDS = {
     "FG_CRYPTO": {"normal": (0, 75), "tension": (75, 85), "crisis": (85, 100)},
 }
 
+# Ventana del gráfico (en días) por indicador. Por defecto son 90 días,
+# suficiente para series diarias. Las series mensuales necesitan más para
+# que el gráfico tenga varios puntos.
+CHART_DAYS_OVERRIDE = {
+    "EXPINF2YR": 200,  # serie mensual -> ~6-7 meses = medio año
+}
+
 INDICATORS = {
     # Fila 1 (izquierda a derecha)
     "DGS10": "U.S. Bond 10 years (Rendimiento)",
@@ -461,8 +468,10 @@ def process_observations(indicator_code, indicator_name, observations):
                     item['rating'] = obs['rating']
                 last_three.append(item)
 
-    # Gráfico de los últimos 3 meses
-    cutoff_date = datetime.now() - timedelta(days=90)
+    # Ventana del gráfico: 90 días por defecto (series diarias); las
+    # series mensuales/anómalas se configuran en CHART_DAYS_OVERRIDE.
+    cutoff_date = datetime.now() - timedelta(
+        days=CHART_DAYS_OVERRIDE.get(indicator_code, 90))
     year_data = []
     for obs in observations:
         if obs['value'] != '.':
