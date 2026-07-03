@@ -24,8 +24,8 @@ POLYGON_API_KEY = os.environ.get('POLYGON_API_KEY', 'your_polygon_api_key_here')
 THRESHOLDS = {
     "DGS10": {"normal": (0, 4.5), "tension": (4.51, 4.65), "crisis": (4.66, 100)},
     "BAMLC0A4CBBB": {"normal": (0, 1.05), "tension": (1.05, 1.15), "crisis": (1.15, 100)},
-    "BAMLH0A0HYM2": {"normal": (0, 4.5), "tension": (4.5, 6.5), "crisis": (6.5, 100)},
     "HYG": {"normal": (80, 10000), "tension": (78.5, 80), "crisis": (0, 78.5)},
+    "EXPINF2YR": {"normal": (0, 2.5), "tension": (2.5, 3.0), "crisis": (3.0, 100)},
     "MMNRNJ": {"normal": (0, 200), "tension": (80, 120), "crisis": (120, 500)},
     "WRESBAL": {"normal": (3100000, 100000000), "tension": (2900000, 3100000), "crisis": (0, 2900000)},
     "WTREGEN": {"normal": (0, 800000), "tension": (800000, 900000), "crisis": (900000, 10000000)},
@@ -36,17 +36,17 @@ THRESHOLDS = {
 
 INDICATORS = {
     # Fila 1 (izquierda a derecha)
-    "BAMLC0A4CBBB": "Prima de riesgo US Bond BBB OAS",
-    "BAMLH0A0HYM2": "Prima de riesgo US Bond High Yield OAS",
-    "HYG": "iShares iBoxx $ High Yield Corporate Bond ETF",
+    "DGS10": "U.S. Bond 10 years (Rendimiento)",
+    "BAMLC0A4CBBB": "U.S. Bond BBB OAS (Prima de riesgo)",
+    "HYG": "ETF iShares iBoxx $ High Yield Corporate Bond",
     # Fila 2 (izquierda a derecha)
-    "DGS10": "Rendimiento US Bond 10 años",
+    "MMNRNJ": "U.S. Bond MOVE Index (Volatilidad)",
     "WRESBAL": "U.S. Reserve Balances (Millions of $)",
     "WTREGEN": "U.S. Treasury General Account (Millions of $)",
     # Fila 3 (izquierda a derecha)
-    "MMNRNJ": "Indice MOVE (Volatilidad US Bond)",
-    "FG_STOCKS": "Índice Codicia y Miedo Stocks (CNN)",
-    "FG_CRYPTO": "Índice Codicia y Miedo Crypto (Alternative)",
+    "EXPINF2YR": "U.S. 2-Year Expected Inflation",
+    "FG_STOCKS": "Stocks Fear & Greed Index (by CNN)",
+    "FG_CRYPTO": "Crypto Fear & Greed Index (by Alternative)",
 }
 
 def check_auth(f):
